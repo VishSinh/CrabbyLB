@@ -1,0 +1,74 @@
+# Prerequisites
+*.d
+
+# Compiled Object files
+*.slo
+*.lo
+*.o
+*.obj
+
+# Precompiled Headers
+*.gch
+*.pch
+
+# Compiled Dynamic libraries
+*.so
+*.dylib
+*.dll
+
+# Fortran module files
+*.mod
+*.smod
+
+# Compiled Static libraries
+*.lai
+*.la
+*.a
+*.lib
+
+# Executables
+*.exe
+*.out
+*.app
+
+
+# Ignore build artifacts and binaries
+/bin/
+/build/
+*.o
+*.out
+*.exe
+*.a
+*.so
+*.dll
+
+# Ignore CMake intermediate files
+/CMakeFiles/
+/CMakeCache.txt
+/cmake_install.cmake
+/Makefile
+
+# Ignore logs and temporary files
+*.log
+*.tmp
+*.swp
+*.bak
+*.lock
+
+# Ignore core dumps and debug files
+*.core
+*.dSYM/
+*.gch
+*.pch
+*.obj
+
+# Ignore Visual Studio Code settings
+.vscode/
+*.code-workspace
+
+# Ignore generated documentation
+/docs/generated/
+/public/
+
+# Ignore backup files
+*~
