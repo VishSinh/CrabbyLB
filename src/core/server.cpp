@@ -4,6 +4,8 @@
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
+#include <thread>
+
 
 Server::Server(int port) : port(port) {}
 
@@ -43,7 +45,7 @@ void Server::start() {
         exit(EXIT_FAILURE);
     }
 
-    std::cout << "Listening on port " << port << std::endl;
+    std::cout << "CrabbyLB listening on port " << port << std::endl;
 
     // Main server loop to accept and handle incoming requests
     // This loop continuously accepts incoming connections and handles them.
@@ -57,9 +59,10 @@ void Server::start() {
             exit(EXIT_FAILURE);
         }
 
-        handle_request(new_socket);
+        std::cout << "New Connection accepted! Spawing thread to handle request." << std::endl;
 
-        close(new_socket);
+        std::thread request_thread(&Server::handle_request, this, new_socket);
+        request_thread.detach();
     }
 }
 
@@ -67,21 +70,28 @@ void Server::start() {
 // This function serves the purpose of processing incoming HTTP requests and sending back a basic HTTP response.
 // It reads the request from the client socket, prints it to the console, and sends a simple HTML response.
 void Server::handle_request(int client_socket){
-    char buffer[1024] = {0};           // Buffer to store incoming request
-    read(client_socket, buffer, 1024); // Read data from client socket
+    char buffer[1024] = {0};                         // Buffer to store incoming request
+    int valread = read(client_socket, buffer, 1024); // Read request from client
+
+
+    if(valread < 0){
+        perror("Failed to read from socket");
+        close(client_socket);
+        return;
+    }
 
     // Print the request to the console
     // std::cout << "Received Request:\n" << buffer << std::endl;
 
     Request request(buffer); // Parse the request
 
+    // Log the incoming request
     std::cout << "\n\nIncoming Request: " << std::endl;
     std::cout << "Request Path: " << request.get_path() << std::endl; 
     std::cout << "Request Method: " << request.get_method() << std::endl;
-    // Print all query parameters
-    std::cout << "\nQuery Parameters: " <<  request.get_query_params().size() << std::endl;
+    std::cout << "Query Parameters: " <<  request.get_query_params().size() << std::endl;
     for (auto const& [key, val] : request.get_query_params()) {
-        std::cout << key << ": " << val << std::endl;
+        std::cout << "PARAM" << key << ": " << val << std::endl;
     }
 
     Response response(200); // Create a response with status code 200 (OK)
@@ -113,6 +123,8 @@ void Server::handle_request(int client_socket){
         response.set_body("<h1>404 Not Found</h1>"); 
     }
 
-    std::string final_response = response.build_response(); // Build the final response
-    send(client_socket, final_response.c_str(), final_response.length(), 0); // Send response to client
+    std::string final_response = response.build_response(); 
+    send(client_socket, final_response.c_str(), final_response.length(), 0); 
+
+    close(client_socket); 
 }
