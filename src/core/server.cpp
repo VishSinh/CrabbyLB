@@ -1,13 +1,16 @@
 #include "core/server.h"
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <arpa/inet.h>
 #include <unistd.h>
 #include <cstring>
 #include <iostream>
 #include <thread>
 
+// Server::Server(int port) : port(port) {}
+// Server::Server(int port, size_t num_threads) : port(port), thread_pool(num_threads) {}
 
-Server::Server(int port, size_t num_threads) : port(port), thread_pool(num_threads) {}
+Server::Server(int port, const std::vector<std::string>& backend_addresses) : port(port), load_balancer(backend_addresses) {}
 
 void Server::start() {
     int server_fd, new_socket;
@@ -59,24 +62,29 @@ void Server::start() {
             exit(EXIT_FAILURE);
         }
 
-        std::cout << "New Connection accepted! Adding task to thread pool..." << std::endl;
-
+        // PREVIOUS IMPLEMENTATION: Multithreading
         // // Create a new thread to handle the request
         // // This code creates a new thread to handle the incoming request.
         // // The thread runs the handle_request function, which processes the request and sends a response.
         // std::thread request_thread(&Server::handle_request, this, new_socket);
-
+        
         // // Detach the thread to allow it to run independently
         // // This code detaches the thread, allowing it to run independently of the main thread.
         // // This is necessary to ensure that the server can handle multiple requests concurrently.
         // request_thread.detach();
+        
+        // PREVIOUS IMPLEMENTATION: Thread Pool
+        // // Add the task to the thread pool
+        // // This code enqueues the task to the thread pool, which will be executed
+        // // by one of the worker threads in the pool.
+        // std::cout << "New Connection accepted! Adding task to thread pool..." << std::endl;
+        // thread_pool.enqueue_task([this, new_socket]{
+        //     handle_request(new_socket);
+        // });
 
-        // Add the task to the thread pool
-        // This code enqueues the task to the thread pool, which will be executed
-        // by one of the worker threads in the pool.
-        thread_pool.enqueue_task([this, new_socket]{
-            handle_request(new_socket);
-        });
+        // Implementing Multi threading without thread pool for Load Balancer
+        std::thread request_thread(&Server::handle_request, this, new_socket);
+        request_thread.detach();
     }
 }
 
@@ -99,46 +107,118 @@ void Server::handle_request(int client_socket){
 
     Request request(buffer); // Parse the request
 
+    std::cout << "Incoming request for path: " << request.get_path() << "\n";
+
     // Log the incoming request
-    std::cout << "\n\nIncoming Request: " << std::endl;
-    std::cout << "Request Path: " << request.get_path() << std::endl; 
-    std::cout << "Request Method: " << request.get_method() << std::endl;
-    std::cout << "Query Parameters: " <<  request.get_query_params().size() << std::endl;
-    for (auto const& [key, val] : request.get_query_params()) {
-        std::cout << "PARAM-" << key << ": " << val << std::endl;
-    }
+    // std::cout << "\n\nIncoming Request: " << std::endl;
+    // std::cout << "Request Path: " << request.get_path() << std::endl; 
+    // std::cout << "Request Method: " << request.get_method() << std::endl;
+    // std::cout << "Query Parameters: " <<  request.get_query_params().size() << std::endl;
+    // for (auto const& [key, val] : request.get_query_params()) {
+    //     std::cout << "PARAM-" << key << ": " << val << std::endl;
+    // }
 
-    Response response(200); // Create a response with status code 200 (OK)
-    response.add_header("Content-Type", "text/html"); // Add a content type header
+    try{
+        Backend backend = load_balancer.get_next_backend(); // Get the next available backend server
+        std::cout << "Routing request to backend: " << backend.address << std::endl;
 
-    if (request.get_path() == "/") {
-        response.set_body("<h1>Hello, CrabbyLB!</h1>"); 
-    } else if (request.get_path() == "/api/data") {
-        // Get all query parameters
-        std::map<std::string, std::string> query_params = request.get_query_params();
+        std::string backend_ip;
+        int backend_port;
 
-        // Construct a string with all query parameters
-        std::string query_string = "<h1>Query Parameters found:</h1>";
-        for (auto const& [key, val] : query_params) {
-            query_string += "<p>" + key + ": " + val + "</p>";
+        size_t colon_pos = backend.address.find(':');
+
+        if (colon_pos != std::string::npos) {
+            backend_ip = backend.address.substr(0, colon_pos);
+            backend_port = std::stoi(backend.address.substr(colon_pos + 1));
+        } else {
+            throw std::runtime_error("Invalid backend address format");
+            close(client_socket);
+            return;
         }
 
-        if (query_params.size() == 0) {
-            Response response(400); // Set response status code to 400 (Bad Request)
-            response.set_body("<h1>400 Bad Request</h1><h2>No query parameters found.</h2>"); 
-        } else{
-            response.set_body(query_string); 
+        // Create socket to forward request to backend server
+        int backend_socket = socket(AF_INET, SOCK_STREAM, 0);
+        if (backend_socket < 0) {
+            perror("Failed to create socket to backend");
+            close(client_socket);
+            return;
         }
-    }
-    
-    
-    else {
-        response = Response(404); // Set response status code to 404 (Not Found)
-        response.set_body("<h1>404 Not Found</h1>"); 
+
+        // Configure backend server address settings
+        struct sockaddr_in backend_address;
+        backend_address.sin_family = AF_INET;
+        backend_address.sin_port = htons(backend_port); // Backend server port listening on 8081 (default)
+        
+        if (inet_pton(AF_INET, backend_ip.c_str(), &backend_address.sin_addr) <= 0) {
+            perror("Invalid address/ Address not supported");
+            close(backend_socket);
+            close(client_socket);   
+            return;
+        }
+
+        // Connect to the backend server
+        if (connect(backend_socket, (struct sockaddr*)&backend_address, sizeof(backend_address)) < 0) {
+            perror("Connection to backend server failed");
+            load_balancer.mark_backend_down(backend.address); // Mark the backend as unavailable
+            close(backend_socket);
+            close(client_socket);
+            return;
+        }
+
+        // Forward the request to the backend server
+        send(backend_socket, buffer, strlen(buffer), 0);
+
+        // Get response from the backend server
+        char response_buffer[1024];
+        ssize_t bytes_read;
+        while ((bytes_read = read(backend_socket, response_buffer, sizeof(response_buffer))) > 0) {
+            // Forward the response to the client
+            send(client_socket, response_buffer, bytes_read, 0);
+        }
+
+        if (bytes_read < 0) {
+            perror("Error reading response from backend");
+        }
+
+        close(backend_socket); // Close the backend socket
+    } catch (const std::runtime_error& e){
+        std::cerr << "Error forwarding request: " << e.what() << std::endl;
     }
 
-    std::string final_response = response.build_response(); 
-    send(client_socket, final_response.c_str(), final_response.length(), 0); 
+    close(client_socket); // Close the client socket¯
 
-    close(client_socket); 
+
+    // Response response(200); // Create a response with status code 200 (OK)
+    // response.add_header("Content-Type", "text/html"); // Add a content type header
+
+    // if (request.get_path() == "/") {
+    //     response.set_body("<h1>Hello, CrabbyLB!</h1>"); 
+    // } else if (request.get_path() == "/api/data") {
+    //     // Get all query parameters
+    //     std::map<std::string, std::string> query_params = request.get_query_params();
+
+    //     // Construct a string with all query parameters
+    //     std::string query_string = "<h1>Query Parameters found:</h1>";
+    //     for (auto const& [key, val] : query_params) {
+    //         query_string += "<p>" + key + ": " + val + "</p>";
+    //     }
+
+    //     if (query_params.size() == 0) {
+    //         Response response(400); // Set response status code to 400 (Bad Request)
+    //         response.set_body("<h1>400 Bad Request</h1><h2>No query parameters found.</h2>"); 
+    //     } else{
+    //         response.set_body(query_string); 
+    //     }
+    // }
+    
+    
+    // else {
+    //     response = Response(404); // Set response status code to 404 (Not Found)
+    //     response.set_body("<h1>404 Not Found</h1>"); 
+    // }
+
+    // std::string final_response = response.build_response(); 
+    // send(client_socket, final_response.c_str(), final_response.length(), 0); 
+
+    // close(client_socket); 
 }

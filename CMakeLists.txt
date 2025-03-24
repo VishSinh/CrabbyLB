@@ -16,6 +16,7 @@ set(SOURCES
     src/core/request.cpp
     src/core/response.cpp
     src/core/thread_pool.cpp
+    src/core/load_balancer.cpp
 )
 
 # Create executable
