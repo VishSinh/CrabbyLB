@@ -20,6 +20,7 @@ set(SOURCES
     src/core/response.cpp
     src/core/thread_pool.cpp
     src/core/load_balancer.cpp
+    src/core/utils.cpp
 )
 
 # Create executable

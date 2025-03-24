@@ -1,229 +1,212 @@
 #include "core/server.h"
+#include "core/utils.h"
+#include <thread>
+#include <iostream>
 #include <sys/socket.h>
 #include <netinet/in.h>
 #include <arpa/inet.h>
 #include <unistd.h>
-#include <cstring>
-#include <iostream>
-#include <thread>
 
-// Server::Server(int port) : port(port) {}
-// Server::Server(int port, size_t num_threads) : port(port), thread_pool(num_threads) {}
+// Constructor to initialize port and mode with optional backend addresses
+Server::Server(int port, ServerMode mode, const std::vector<std::string>& backend_addresses)
+    : port(port), mode(mode), thread_pool(10), load_balancer(backend_addresses) {}
 
-Server::Server(int port, const std::vector<std::string>& backend_addresses) : port(port), load_balancer(backend_addresses) {}
 
+// Destructor
 Server::~Server() {
-    // Stop the health check thread
-    load_balancer.stop_health_check();
+    std::cout << "Shutting down CrabbyLB..." << std::endl;
 }
 
+// Start server based on selected mode
 void Server::start() {
-    int server_fd, new_socket;
-    struct sockaddr_in address;
-    int addrlen = sizeof(address);
-
-    // Create a socket (IPv4, TCP)
-    // This function is being used because it creates a socket that will be used to listen for incoming connections.
-    // The socket is configured for IPv4 and TCP, which is suitable for HTTP communication.
-    if ((server_fd  = socket(AF_INET, SOCK_STREAM, 0)) == 0) {
-        perror("Socket Failed");
-        exit(EXIT_FAILURE);
+    switch (mode) {
+        case ServerMode::BASIC:
+            start_basic();
+            break;
+        case ServerMode::MULTI_THREAD:
+            start_multi_threaded();
+            break;
+        case ServerMode::THREAD_POOL:
+            start_thread_pool();
+            break;
+        case ServerMode::LOAD_BALANCER:
+            start_load_balancer();
+            break;
+        default:
+            std::cerr << "Invalid server mode!" << std::endl;
+            exit(1);
     }
+}
 
-    // Configure server address settings
-    // This sets up the server address structure with the necessary parameters.
-    // The server will accept connections from any IP address and listen on the specified port.
-    address.sin_family = AF_INET;         // IPV4
-    address.sin_addr.s_addr = INADDR_ANY; // Accepts connects from any IP
-    address.sin_port = htons(port);       // Convert port to network byte order
+// Basic HTTP server (single-threaded)
+void Server::start_basic() {
+    int server_fd = create_listening_socket(port);
+    std::cout << "🦾 Starting Basic HTTP Server on port " << port << "..." << std::endl;
 
-    // Bind socket to the specified port
-    // This function binds the socket to the address and port specified in the address structure.
-    // This is necessary to ensure that the server can listen for incoming connections on the correct port.
-    if (bind(server_fd, (struct sockaddr*)&address, sizeof(address)) < 0) {
-        perror("Bind Failed");
-        exit(EXIT_FAILURE);
-    }
+    while (true) {
+        struct sockaddr_in address;
+        int addrlen = sizeof(address);
+        int client_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
 
-    // Start listening for incoming connections
-    // This function puts the server socket into a passive mode where it waits for incoming connection requests.
-    // The backlog parameter (3) specifies the maximum length for the queue of pending connections.
-    if (listen(server_fd, 3) < 0) {
-        perror("Listen Failed");
-        exit(EXIT_FAILURE);
-    }
-
-    std::cout << "CrabbyLB listening on port " << port << std::endl;
-
-    // Main server loop to accept and handle incoming requests
-    // This loop continuously accepts incoming connections and handles them.
-    // It ensures that the server can handle multiple client requests sequentially.
-    while(true){
-        // Accept an incoming connection
-        // This function accepts a connection from a client.
-        // It creates a new socket for the connection and returns a file descriptor for the new socket.
-        if ((new_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen)) < 0) {
-            perror("Accept Failed");
-            exit(EXIT_FAILURE);
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
         }
 
-        // PREVIOUS IMPLEMENTATION: Multithreading
-        // // Create a new thread to handle the request
-        // // This code creates a new thread to handle the incoming request.
-        // // The thread runs the handle_request function, which processes the request and sends a response.
-        // std::thread request_thread(&Server::handle_request, this, new_socket);
-        
-        // // Detach the thread to allow it to run independently
-        // // This code detaches the thread, allowing it to run independently of the main thread.
-        // // This is necessary to ensure that the server can handle multiple requests concurrently.
-        // request_thread.detach();
-        
-        // PREVIOUS IMPLEMENTATION: Thread Pool
-        // // Add the task to the thread pool
-        // // This code enqueues the task to the thread pool, which will be executed
-        // // by one of the worker threads in the pool.
-        // std::cout << "New Connection accepted! Adding task to thread pool..." << std::endl;
-        // thread_pool.enqueue_task([this, new_socket]{
-        //     handle_request(new_socket);
-        // });
+        handle_request(client_socket);
+    }
+}
 
-        // Implementing Multi threading without thread pool for Load Balancer
-        std::thread request_thread(&Server::handle_request, this, new_socket);
+// Multi-threaded server (one thread per request)
+void Server::start_multi_threaded() {
+    int server_fd = create_listening_socket(port);
+    std::cout << "🧵 Starting Multi-Threaded Server on port " << port << "..." << std::endl;
+
+    while (true) {
+        struct sockaddr_in address;
+        int addrlen = sizeof(address);
+        int client_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        std::thread request_thread(&Server::handle_request, this, client_socket);
         request_thread.detach();
     }
 }
 
-// Handle incoming HTTP requests and send basic response 
-// This function serves the purpose of processing incoming HTTP requests and sending back a basic HTTP response.
-// It reads the request from the client socket, prints it to the console, and sends a simple HTML response.
-void Server::handle_request(int client_socket){
-    char buffer[1024] = {0};                         // Buffer to store incoming request
-    int valread = read(client_socket, buffer, 1024); // Read request from client
+// ThreadPool-based server
+void Server::start_thread_pool() {
+    int server_fd = create_listening_socket(port);
+    std::cout << "⚡️ Starting ThreadPool-Based Server on port " << port << "..." << std::endl;
 
-    // Check if read was successful
-    if(valread < 0){
-        perror("Failed to read from socket");
+    while (true) {
+        struct sockaddr_in address;
+        int addrlen = sizeof(address);
+        int client_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        thread_pool.enqueue_task([this, client_socket] {
+            handle_request(client_socket);
+        });
+    }
+}
+
+// Load Balancer with Health Checks and Auto-Restart
+void Server::start_load_balancer() {
+    int server_fd = create_listening_socket(port);
+    std::cout << "🌐 Starting Load Balancer with Health Checks on port " << port << "..." << std::endl;
+
+    while (true) {
+        struct sockaddr_in address;
+        int addrlen = sizeof(address);
+        int client_socket = accept(server_fd, (struct sockaddr*)&address, (socklen_t*)&addrlen);
+
+        if (client_socket < 0) {
+            perror("Accept failed");
+            continue;
+        }
+
+        std::thread request_thread(&Server::handle_request, this, client_socket);
+        request_thread.detach();
+    }
+}
+
+// Handle incoming HTTP requests
+// Handle incoming HTTP requests
+void Server::handle_request(int client_socket) {
+    std::string request_data = read_data(client_socket);
+    if (request_data.empty()) {
         close(client_socket);
         return;
     }
 
-    // Print the request to the console
-    // std::cout << "Received Request:\n" << buffer << std::endl;
+    Request request(request_data);
 
-    Request request(buffer); // Parse the request
+    if (mode == ServerMode::LOAD_BALANCER) {
+        forward_request_to_backend(client_socket, request);
+    } else {
+        process_request(client_socket, request);
+    }
+}
 
-    std::cout << "Incoming request for path: " << request.get_path() << "\n";
+// Process request and generate appropriate response
+void Server::process_request(int client_socket, const Request& request) {
+    std::string response_body;
+    int status_code = 200;
 
-    // Log the incoming request
-    // std::cout << "\n\nIncoming Request: " << std::endl;
-    // std::cout << "Request Path: " << request.get_path() << std::endl; 
-    // std::cout << "Request Method: " << request.get_method() << std::endl;
-    // std::cout << "Query Parameters: " <<  request.get_query_params().size() << std::endl;
-    // for (auto const& [key, val] : request.get_query_params()) {
-    //     std::cout << "PARAM-" << key << ": " << val << std::endl;
-    // }
+    if (request.get_path() == "/") {
+        response_body = "<h1>Welcome to CrabbyLB!</h1>";
+    } else if (request.get_path() == "/health") {
+        response_body = "OK";
+    } else {
+        status_code = 404;
+        response_body = "<h1>404 Not Found</h1>";
+    }
 
-    try{
-        Backend backend = load_balancer.get_next_backend(); // Get the next available backend server
-        std::cout << "Routing request to backend: " << backend.address << std::endl;
+    Response response(status_code);
+    response.add_header("Content-Type", "text/html");
+    response.set_body(response_body);
 
-        std::string backend_ip;
-        int backend_port;
+    std::string final_response = response.build_response();
+    send_data(client_socket, final_response);
+    close(client_socket);
+}
 
-        size_t colon_pos = backend.address.find(':');
 
-        if (colon_pos != std::string::npos) {
-            backend_ip = backend.address.substr(0, colon_pos);
-            backend_port = std::stoi(backend.address.substr(colon_pos + 1));
-        } else {
-            throw std::runtime_error("Invalid backend address format");
-            close(client_socket);
-            return;
-        }
+// Forward request to backend and send response to client
+void Server::forward_request_to_backend(int client_socket, const Request& request) {
+    try {
+        Backend backend = load_balancer.get_next_backend();  // Get next backend
+        std::cout << "🔄 Routing request to backend: " << backend.address << "\n";
 
-        // Create socket to forward request to backend server
+        std::string backend_ip = backend.address.substr(0, backend.address.find(":"));
+        int backend_port = std::stoi(backend.address.substr(backend.address.find(":") + 1));
+
         int backend_socket = socket(AF_INET, SOCK_STREAM, 0);
         if (backend_socket < 0) {
-            perror("Failed to create socket to backend");
+            perror("Backend socket creation failed");
+            load_balancer.mark_backend_down(backend.address);
             close(client_socket);
             return;
         }
 
-        // Configure backend server address settings
         struct sockaddr_in backend_address;
         backend_address.sin_family = AF_INET;
-        backend_address.sin_port = htons(backend_port); // Backend server port listening on 8081 (default)
-        
-        if (inet_pton(AF_INET, backend_ip.c_str(), &backend_address.sin_addr) <= 0) {
-            perror("Invalid address/ Address not supported");
-            close(backend_socket);
-            close(client_socket);   
-            return;
-        }
+        backend_address.sin_port = htons(backend_port);
+        inet_pton(AF_INET, backend_ip.c_str(), &backend_address.sin_addr);
 
-        // Connect to the backend server
+        // Connect to the backend
         if (connect(backend_socket, (struct sockaddr*)&backend_address, sizeof(backend_address)) < 0) {
             perror("Connection to backend server failed");
-            load_balancer.mark_backend_down(backend.address); // Mark the backend as unavailable
+            load_balancer.mark_backend_down(backend.address);
             close(backend_socket);
             close(client_socket);
             return;
         }
 
-        // Forward the request to the backend server
-        send(backend_socket, buffer, strlen(buffer), 0);
+        // Forward request to backend
+        std::string raw_request = request.get_raw_request();
+        send(backend_socket, raw_request.c_str(), raw_request.length(), 0);
 
-        // Get response from the backend server
+        // Receive response from backend
         char response_buffer[1024];
         ssize_t bytes_read;
         while ((bytes_read = read(backend_socket, response_buffer, sizeof(response_buffer))) > 0) {
-            // Forward the response to the client
             send(client_socket, response_buffer, bytes_read, 0);
         }
 
-        if (bytes_read < 0) {
-            perror("Error reading response from backend");
-        }
-
-        close(backend_socket); // Close the backend socket
-    } catch (const std::runtime_error& e){
-        std::cerr << "Error forwarding request: " << e.what() << std::endl;
+        close(backend_socket);
+    } catch (const std::runtime_error& e) {
+        std::cerr << "⚠️ Error forwarding request: " << e.what() << "\n";
+        send_data(client_socket, "HTTP/1.1 503 Service Unavailable\r\nContent-Length: 0\r\n\r\n");
     }
 
-    close(client_socket); // Close the client socket¯
-
-
-    // Response response(200); // Create a response with status code 200 (OK)
-    // response.add_header("Content-Type", "text/html"); // Add a content type header
-
-    // if (request.get_path() == "/") {
-    //     response.set_body("<h1>Hello, CrabbyLB!</h1>"); 
-    // } else if (request.get_path() == "/api/data") {
-    //     // Get all query parameters
-    //     std::map<std::string, std::string> query_params = request.get_query_params();
-
-    //     // Construct a string with all query parameters
-    //     std::string query_string = "<h1>Query Parameters found:</h1>";
-    //     for (auto const& [key, val] : query_params) {
-    //         query_string += "<p>" + key + ": " + val + "</p>";
-    //     }
-
-    //     if (query_params.size() == 0) {
-    //         Response response(400); // Set response status code to 400 (Bad Request)
-    //         response.set_body("<h1>400 Bad Request</h1><h2>No query parameters found.</h2>"); 
-    //     } else{
-    //         response.set_body(query_string); 
-    //     }
-    // }
-    
-    
-    // else {
-    //     response = Response(404); // Set response status code to 404 (Not Found)
-    //     response.set_body("<h1>404 Not Found</h1>"); 
-    // }
-
-    // std::string final_response = response.build_response(); 
-    // send(client_socket, final_response.c_str(), final_response.length(), 0); 
-
-    // close(client_socket); 
+    close(client_socket);
 }

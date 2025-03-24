@@ -14,12 +14,14 @@ public:
     std::string get_header(const std::string& key) const;
     std::string get_query_param(const std::string& key) const;
     std::map<std::string, std::string> get_query_params() const;
+    std::string get_raw_request() const;
 
 private:
     std::string method;
     std::string path;
     std::map<std::string, std::string> headers;
     std::map<std::string, std::string> query_params;
+    std::string raw_request;
 
     void parse_headers(const std::string& header_lines);
     void parse_query_params(const std::string& query_string);

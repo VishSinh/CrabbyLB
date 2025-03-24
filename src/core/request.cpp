@@ -3,7 +3,7 @@
 #include <algorithm>
 
 
-Request::Request(const std::string& raw_request){
+Request::Request(const std::string& raw_request) : raw_request(raw_request){
     std::istringstream request_stream(raw_request);
     std::string request_line;
 
@@ -38,6 +38,10 @@ std::string Request::get_method() const {
 
 std::string Request::get_path() const {
     return path;
+}
+
+std::string Request::get_raw_request() const {
+    return raw_request;
 }
 
 // Header retrieval (e.g., Host, User-Agent)
