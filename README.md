@@ -44,11 +44,20 @@ To run CrabbyLB, use the provided `run_crabbyLB.sh` script:
 
 ---
 
+## 🔄 **Stress Test**
+
+To perform a stress test on CrabbyLB, you can use the `wrk` tool:
+```sh
+wrk -t4 -c100 -d5s http://localhost:8080/
+```
+
+This command runs a stress test with 4 threads, 100 connections, for a duration of 5 seconds against the server running on `localhost` at port `8080`.
+
+---
+
 # 📊 CrabbyLB Current Performance Analysis
 
 This report summarizes the current performance of CrabbyLB across different modes.
-
-
 
 ## 🚀 **1. Basic Mode**
 - **Requests/sec:** ~1486.75  
