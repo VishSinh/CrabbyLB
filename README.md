@@ -15,5 +15,44 @@ With a focus on performance and concurrency, CrabbyLB is capable of handling hig
 ✅ Graceful Handling of Backend Failures and Recovery.  
 ✅ Extensible Architecture to add more algorithms (e.g., Least Connections, Weighted Round Robin).  
 
+---
+
+## 📦 **Installation**
+
+To build and install CrabbyLB, follow these steps:
+
+1. Clone the repository:
+    ```sh
+    git clone https://github.com/yourusername/crabbyLB.git
+    cd crabbyLB
+    ```
+
+2. Create a build directory and navigate into it:
+    ```sh
+    mkdir build
+    cd build
+    ```
+
+3. Run CMake to configure the project:
+    ```sh
+    cmake ..
+    ```
+
+4. Build the project:
+    ```sh
+    make
+    ```
+
+5. The `crabbyLB` executable will be located in the `bin` directory.
 
 ---
+
+## 🛠️ **Usage**
+
+To run CrabbyLB, use the following command:
+```sh
+./bin/crabbyLB
+```
+
+You can configure the server and load balancer settings by editing the configuration file located at `config/crabbyLB.conf`.
+
