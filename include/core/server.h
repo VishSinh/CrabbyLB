@@ -6,10 +6,15 @@
 #include "core/thread_pool.h"
 #include "core/load_balancer.h"
 
+
+
+
 class Server {
 public:
     // Server(int port, size_t num_threads = 4);
     Server(int port, const std::vector<std::string> &backend_addresses);
+
+    ~Server();
 
 
     void start();

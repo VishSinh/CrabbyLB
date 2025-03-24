@@ -9,6 +9,9 @@ set(CMAKE_CXX_STANDARD_REQUIRED True)
 # Include directories for headers
 include_directories(include)
 
+# pthread for threading support
+set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -pthread")
+
 # Add source files
 set(SOURCES
     src/main.cpp

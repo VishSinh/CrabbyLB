@@ -4,6 +4,8 @@
 #include <vector>
 #include <string>
 #include <mutex>
+#include <thread>
+#include <atomic>
 
 struct Backend {
     std::string address; // IP:PORT of the backend server
@@ -22,12 +24,20 @@ public:
     void mark_backend_down(const std::string& address);
 
     // Check backend health periodically
-    void health_check();
+    void start_health_check();
+    void stop_health_check();
 
 private:
     std::vector<Backend> backends;
     std::mutex backend_mutex;
     int current_backend_index; 
+
+    // Health check thread
+    std::thread health_check_thread;
+    std::atomic<bool> stop_checking;
+
+    // Health check function
+    void perform_health_check();
 };
 
 #endif

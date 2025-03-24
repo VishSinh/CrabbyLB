@@ -12,6 +12,11 @@
 
 Server::Server(int port, const std::vector<std::string>& backend_addresses) : port(port), load_balancer(backend_addresses) {}
 
+Server::~Server() {
+    // Stop the health check thread
+    load_balancer.stop_health_check();
+}
+
 void Server::start() {
     int server_fd, new_socket;
     struct sockaddr_in address;
