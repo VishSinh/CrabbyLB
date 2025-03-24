@@ -4,7 +4,7 @@
 int main() {
     std::cout << "Starting CrabbyLB on port 8080..." << std::endl;
 
-    Server server(8080);
+    Server server(8080, 12);
 
     server.start();
 

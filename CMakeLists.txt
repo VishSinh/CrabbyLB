@@ -1,14 +1,25 @@
+# CMake configuration for CrabbyLB
 cmake_minimum_required(VERSION 3.10)
 project(CrabbyLB)
 
+# Set C++ standard to C++17 (explicitly required for thread pool & advanced features)
 set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED True)
+
+# Include directories for headers
+include_directories(include)
 
 # Add source files
-file(GLOB_RECURSE SOURCES "src/*.cpp")
-include_directories(include)
+set(SOURCES
+    src/main.cpp
+    src/core/server.cpp
+    src/core/request.cpp
+    src/core/response.cpp
+    src/core/thread_pool.cpp
+)
 
 # Create executable
 add_executable(crabbyLB ${SOURCES})
 
-# Output binary to bin/
+# Set output directory for binary
 set_target_properties(crabbyLB PROPERTIES RUNTIME_OUTPUT_DIRECTORY "${CMAKE_SOURCE_DIR}/bin")

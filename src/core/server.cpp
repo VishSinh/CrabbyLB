@@ -7,7 +7,7 @@
 #include <thread>
 
 
-Server::Server(int port) : port(port) {}
+Server::Server(int port, size_t num_threads) : port(port), thread_pool(num_threads) {}
 
 void Server::start() {
     int server_fd, new_socket;
@@ -59,10 +59,24 @@ void Server::start() {
             exit(EXIT_FAILURE);
         }
 
-        std::cout << "New Connection accepted! Spawing thread to handle request." << std::endl;
+        std::cout << "New Connection accepted! Adding task to thread pool..." << std::endl;
 
-        std::thread request_thread(&Server::handle_request, this, new_socket);
-        request_thread.detach();
+        // // Create a new thread to handle the request
+        // // This code creates a new thread to handle the incoming request.
+        // // The thread runs the handle_request function, which processes the request and sends a response.
+        // std::thread request_thread(&Server::handle_request, this, new_socket);
+
+        // // Detach the thread to allow it to run independently
+        // // This code detaches the thread, allowing it to run independently of the main thread.
+        // // This is necessary to ensure that the server can handle multiple requests concurrently.
+        // request_thread.detach();
+
+        // Add the task to the thread pool
+        // This code enqueues the task to the thread pool, which will be executed
+        // by one of the worker threads in the pool.
+        thread_pool.enqueue_task([this, new_socket]{
+            handle_request(new_socket);
+        });
     }
 }
 
@@ -73,7 +87,7 @@ void Server::handle_request(int client_socket){
     char buffer[1024] = {0};                         // Buffer to store incoming request
     int valread = read(client_socket, buffer, 1024); // Read request from client
 
-
+    // Check if read was successful
     if(valread < 0){
         perror("Failed to read from socket");
         close(client_socket);
@@ -91,7 +105,7 @@ void Server::handle_request(int client_socket){
     std::cout << "Request Method: " << request.get_method() << std::endl;
     std::cout << "Query Parameters: " <<  request.get_query_params().size() << std::endl;
     for (auto const& [key, val] : request.get_query_params()) {
-        std::cout << "PARAM" << key << ": " << val << std::endl;
+        std::cout << "PARAM-" << key << ": " << val << std::endl;
     }
 
     Response response(200); // Create a response with status code 200 (OK)
